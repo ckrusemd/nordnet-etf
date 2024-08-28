@@ -83,7 +83,7 @@ df_nordnet = read.csv(filepath_nordnet,sep = "\t", fileEncoding="UCS-2LE",colCla
 
 # Abis
 
-```{r}
+```{r abis}
 df_abis %>% 
   kable() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
@@ -91,7 +91,7 @@ df_abis %>%
 
 # Nordnet
 
-```{r}
+```{r nordnet}
 df_nordnet %>% 
   kable() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
@@ -99,7 +99,7 @@ df_nordnet %>%
 
 # Nordnet - Positivliste
 
-```{r}
+```{r nordnetp}
 df_nordnet %>% 
   filter(Positiv=="Positivliste")
   kable() %>%
@@ -107,7 +107,7 @@ df_nordnet %>%
 ```
 # Nordnet - Positivliste, Månedsopsparing
 
-```{r}
+```{r nordnetpm}
 df_nordnet %>% 
   filter(Positiv=="Positivliste",
          Maanedsopsparing=="Ja")
@@ -117,7 +117,7 @@ df_nordnet %>%
 
 # Nordnet - %Positivliste, Månedsopsparing
 
-```{r}
+```{r nordnetnm}
 df_nordnet %>% 
   filter(!Positiv=="Positivliste",
          Maanedsopsparing=="Ja") %>% 
