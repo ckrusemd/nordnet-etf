@@ -1,7 +1,7 @@
 ---
-title: "nordnet_etf"
+title: "Nordnet ETF"
 author: "Christian Kruse"
-date: "2024-05-08"
+date: "2024-08-28"
 output: html_document
 ---
 
@@ -30,9 +30,11 @@ pacman::p_load(tidyr,
                # rentrez,
                parallel,
                foreach,
+               pbmcapply,
                # earth,
                # progress,
                data.table,
+               openxlsx
                # glue,
                # gganimate
                )
@@ -79,12 +81,84 @@ df_nordnet = read.csv(filepath_nordnet,sep = "\t", fileEncoding="UCS-2LE",colCla
 
 ```
 
+# Abis
 
 ```{r}
-tickers_nordnet = df_nordnet %>% pull(ticker)
+df_abis %>% 
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
 ```
 
-## Yahoo
+# Nordnet
+
+```{r}
+df_nordnet %>% 
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+# Nordnet - Positivliste
+
+```{r}
+df_nordnet %>% 
+  filter(Positiv=="Positivliste")
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+# Nordnet - Positivliste, Månedsopsparing
+
+```{r}
+df_nordnet %>% 
+  filter(Positiv=="Positivliste",
+         Maanedsopsparing=="Ja")
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+# Nordnet - %Positivliste, Månedsopsparing
+
+```{r}
+df_nordnet %>% 
+  filter(!Positiv=="Positivliste",
+         Maanedsopsparing=="Ja") %>% 
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+
+# Yahoo
+
+## +Positivliste, +Månedsopsparing
+
+```{r}
+tickers_nordnet_pm = df_nordnet %>% 
+  filter(Positiv=="Positivliste",
+         Maanedsopsparing=="Ja") %>% 
+  pull(ticker)
+```
+
+```{r}
+tickers_nordnet_nm = df_nordnet %>% 
+  filter(!Positiv=="Positivliste",
+         Maanedsopsparing=="Ja") %>% 
+  pull(ticker)
+```
+
+```{r}
+tickers_nordnet_positiv = df_nordnet %>% 
+  filter(Positiv=="Positivliste") %>% 
+  pull(ticker)
+```
+
+```{r}
+tickers_nordnet_negativ = df_nordnet %>% 
+  filter(!Positiv=="Positivliste") %>% 
+  pull(ticker)
+```
+
+```{r}
+cores = min(detectCores(),40)
+```
 
 ```{r}
 
@@ -110,18 +184,16 @@ query_yahoo = function(ticker) {
 
 ```{r}
 
-library(pbmcapply)
 
-df_ticker_data = pbmclapply(tickers_nordnet,function(ticker) {
+df_ticker_data = pbmclapply( c(tickers_nordnet_pm,tickers_nordnet_nm) ,function(ticker) {
 # df_ticker_data = lapply(tickers_shotgun,function(ticker) {
   Sys.sleep(round(runif(n = 1,min = 0,max = 20)))
   message(ticker)
   tryCatch(expr = {query_yahoo(ticker)},error=function(e) { data.frame() })
-},mc.cores=20)
+},mc.cores=cores)
 df_ticker_data = do.call("rbind",df_ticker_data)
 
 length(unique(df_ticker_data$ticker))
-log_info("done")
 ```
 
 ```{r}
@@ -148,62 +220,39 @@ df_nordnet %>%
 
 ```{r}
 
+df_ticker_data_tickers = df_ticker_data %>% distinct(ticker)
+df_ticker_data_tickers = split(df_ticker_data_tickers,unique(df_ticker_data_tickers$ticker))
 
-library(multidplyr)
-cluster = multidplyr::new_cluster(20)
-cluster_library(cluster,c("tidyr","dplyr","ggplot2","boot","scales","broom"))
-
-cluster_assign(cluster,chg_per_year_boot = function(lm_object) {
-  return( 
-    tidy(lm_object,exp=T)$estimate[2]^365
-    )
-})
-
-cluster_assign(cluster,chg_per_year = function(data, indices) {
-  d <- data[indices,]
-  lm_ <- lm(log(Close)~Date,data=d)
-  return(chg_per_year_boot(lm_)
-  )
-})
-
-
-cluster_assign(cluster,calc_boot_estimates = function(dataframe) {
-
-  set.seed(21011981)
-  results <- boot(data=dataframe, statistic=chg_per_year, R=100)
-  results_cut = boot.ci(results,type = "norm")
+fit_ticker_data = do.call("rbind",pbmclapply( df_ticker_data_tickers, function(ticker_row) {
   
-  result_ci_maintenance = results_cut$t0
-  lower_bca_maintenance = results_cut$normal[2]
-  high_bca_maintenance = results_cut$normal[3]
-  quote_ = paste0(scales::number(result_ci_maintenance,0.0001)," [",scales::number(lower_bca_maintenance,0.0001),";",scales::number(high_bca_maintenance,0.0001),"]")
+  data = df_ticker_data %>% inner_join(ticker_row) %>% filter(min(Date)<=Sys.Date()-years(1))
+  fit_lm = lm(Close~Date,data=data)
+  fit_log = lm(log(Close)~Date,data=data)
+  # LM
+  fit_lm_rsq = summary(fit_lm)$r.squared
+  fit_lm_yrly = predict(fit_lm,data.frame(Date=Sys.Date()))/predict(fit_lm,data.frame(Date=Sys.Date()-years(1)))-1
+  # LOG
+  fit_log_rsq = summary(fit_log)$r.squared
+  fit_log_yrly = predict(fit_log,data.frame(Date=Sys.Date()))/predict(fit_log,data.frame(Date=Sys.Date()-years(1)))-1
   
   return(
-    data.frame(Date=unique(dataframe$Date),
-               result_ci_maintenance=result_ci_maintenance,
-               lower_bca_maintenance=lower_bca_maintenance,
-               high_bca_maintenance=high_bca_maintenance,
-               quote_=quote_)
+    ticker_row %>% 
+      dplyr::mutate(fit_lm_rsq=fit_lm_rsq,
+                    fit_log_rsq=fit_log_rsq,
+                    fit_lm_yrly=fit_lm_yrly,
+                    fit_log_yrly=fit_log_yrly
+                    )
   )
+  
+},mc.cores = cores))
 
-})
 
-
-# Boot estimates
-
-df_boot_growth = df_ticker_data %>% 
-  group_by(ticker) %>% 
-  filter(min(Date)<=Sys.Date()-years(5)) %>% 
-  partition(cluster) %>% 
-  do(calc_boot_estimates(.)) %>% 
-  collect() 
-
-df_boot_growth %>% dplyr::select(-Date) %>% distinct %>% arrange(desc(result_ci_maintenance))
+fit_ticker_data
 
 ```
 
 
-```{r}
+```{r eval=F}
 df_ticker_stats = df_ticker_data %>% 
   group_by(ticker) %>% 
   filter(Date>=Sys.Date()-years(5)) %>% 
@@ -228,7 +277,7 @@ df_ticker_stats = df_ticker_data %>%
 ```
 
 
-```{r}
+```{r eval=F}
 df_ticker_stats %>% 
   inner_join(df_positiv_maanedsopsparing) %>% 
   relocate(ticker,
@@ -240,7 +289,7 @@ df_ticker_stats %>%
   theme(legend.position="null")
 ```
 
-```{r}
+```{r eval=F}
 df_ticker_stats %>% 
   inner_join(df_positiv_maanedsopsparing) %>% 
   relocate(ticker,
@@ -258,7 +307,7 @@ df_ticker_stats %>%
 
 ### Outcomes
 
-```{r}
+```{r eval=F}
 find_increase = function(data) {
   # print(data)
   first_value = data[1]
@@ -281,7 +330,7 @@ find_decrease = function(data) {
 }
 ```
 
-```{r}
+```{r eval=F}
 df_cox = df_ticker_data %>% 
   group_by(ticker) %>% 
   filter(n()>200) %>% 
@@ -298,22 +347,22 @@ Proportions of outcomes:
 
 Increases:
 
-```{r}
+```{r eval=F}
 prop.table( table(df_cox$eofu_bool_incr) )
 ```
 
 Decreases:
 
-```{r}
+```{r eval=F}
 prop.table( table(df_cox$eofu_bool_decr) )
 ```
 
-```{r}
+```{r eval=F}
 fit_surv_cox_incr = survfit(Surv(eofu_time_incr,eofu_bool_incr)~1 ,data=df_cox) 
 ggsurvplot(fit = fit_surv_cox_incr,data = df_cox,conf.int = T,surv.median.line = "hv")
 ```
 
-```{r}
+```{r eval=F}
 fit_surv_cox_decr = survfit(Surv(eofu_time_decr,eofu_bool_decr)~1 ,data=df_cox) 
 ggsurvplot(fit = fit_surv_cox_decr,data = df_cox,conf.int = T,surv.median.line = "hv")
 ```
@@ -321,7 +370,7 @@ ggsurvplot(fit = fit_surv_cox_decr,data = df_cox,conf.int = T,surv.median.line =
 
 First calculate all the different predictors at different time for use in later modelling.
 
-```{r}
+```{r eval=F}
 
 df_grid = expand.grid(ticker=unique(df_cox$ticker),
                       frequency=seq(7,101,by=20))
@@ -369,7 +418,7 @@ df_cox_risk_factors = do.call("rbind",pbmclapply(df_grid,function(grid) {
 
 Then model
 
-```{r}
+```{r eval=F}
 rows = df_cox_risk_factors %>% distinct(ticker,stat)
 rows = split(rows,seq(nrow(rows)))
 
@@ -402,7 +451,7 @@ df_cox_analysis %>%
 
 ```
 
-```{r}
+```{r eval=F}
 df_cox_analysis %>% 
   ggplot(.,aes(x=x,y=y,color=ticker)) +
   geom_line() +
@@ -412,7 +461,7 @@ df_cox_analysis %>%
 
 ### Covariates
 
-```{r}
+```{r eval=F}
 
 lm_coefs = function(data) {
   # print(data)
@@ -473,7 +522,7 @@ fit_params %>% distinct(var,df,c_index) %>% arrange(desc(c_index)) %>%  kable()
 
 
 
-```{r}
+```{r eval=F}
 
 df_combined_cox = df_cox_risk_factors %>% 
   filter(stat %in% c("rsi_7","macdsignal")) %>% 
@@ -499,7 +548,7 @@ termplot(fit_temp,se=FALSE,plot=TRUE)
 
 ## Cox
 
-```{r}
+```{r eval=F}
 
 fit_coxph_incr = coxph(Surv(eofu_time_incr,eofu_bool_incr)~ rsi_14 + sma50_200 + macd_osc + macd_signal + macd_osc_signal + bbands_pctb + cci + momentum + pct,
                   data=df_model )
@@ -515,7 +564,7 @@ fit_coxph_decr$concordance
 ```
 
 
-```{r}
+```{r eval=F}
 summary(fit_coxph_incr)$coefficients %>% 
   data.frame() %>% 
   dplyr::select(2) %>% 
@@ -523,7 +572,7 @@ summary(fit_coxph_incr)$coefficients %>%
   arrange(desc(exp_coef))
 ```
 
-```{r}
+```{r eval=F}
 summary(fit_coxph_decr)$coefficients %>% 
   data.frame() %>% 
   dplyr::select(2) %>% 
@@ -534,7 +583,7 @@ summary(fit_coxph_decr)$coefficients %>%
 
 # Testing
 
-```{r}
+```{r eval=F}
 df_testing = df_model %>% 
   ungroup() %>% 
   dplyr::mutate(relative_risk_incr=predict(fit_coxph_incr,.,type="risk")) %>%
@@ -545,7 +594,7 @@ df_testing = df_model %>%
 
 ## Above cutoff
 
-```{r}
+```{r eval=F}
 # Incr and Decr from relative_risk_incr
 df_cutoff_relative_risk_incr = do.call("rbind",lapply(c(0,0.25,0.5,0.75,seq(1,30,by=1)),function(cutoff) {
   
@@ -567,7 +616,7 @@ df_cutoff_relative_risk_incr %>%
 ```
 
 
-```{r}
+```{r eval=F}
 # Incr and Decr from relative_risk_decr
 df_cutoff_relative_risk_decr = do.call("rbind",lapply(c(0,0.25,0.5,0.75,seq(1,300,by=1)),function(cutoff) {
   
@@ -591,7 +640,7 @@ df_cutoff_relative_risk_decr %>%
 
 ## Below cutoff
 
-```{r}
+```{r eval=F}
 # Incr and Decr from relative_risk_incr
 do.call("rbind",lapply(c(0,0.25,0.5,0.75,seq(1,30,by=1)),function(cutoff) {
   
@@ -611,7 +660,7 @@ do.call("rbind",lapply(c(0,0.25,0.5,0.75,seq(1,30,by=1)),function(cutoff) {
 ```
 
 
-```{r}
+```{r eval=F}
 # Incr and Decr from relative_risk_decr
 do.call("rbind",lapply(c(0,0.25,0.5,0.75,seq(1,300,by=1)),function(cutoff) {
   
@@ -651,7 +700,7 @@ df_testing %>%
 
 ```
 
-```{r}
+```{r eval=F}
 roc_incr = pROC::roc(predictor=df_testing$relative_risk_incr,response=df_testing$eofu_bool_incr)
 best_incr = coords(roc_incr,x="best",best.method="youden")$threshold
 coords(roc_incr) %>% 
@@ -663,7 +712,7 @@ coords(roc_incr) %>%
 ```
 
 
-```{r}
+```{r eval=F}
 roc_decr = pROC::roc(predictor=df_testing$relative_risk_decr,response=df_testing$eofu_bool_decr)
 best_decr = coords(roc_decr,x="best",best.method="youden")$threshold
 coords(roc_decr) %>% 
@@ -676,7 +725,7 @@ coords(roc_decr) %>%
 
 # Prediction going forward
 
-```{r}
+```{r eval=F}
 
 # Extra trading day with 5% drop
 # df_extra_day = df_ticker_data %>% 
@@ -731,7 +780,7 @@ df_predict = df_ticker_data %>%
 ```
 
 
-```{r}
+```{r eval=F}
 order_ = df_predict %>% group_by(ticker) %>% filter(Date==max(Date)) %>% arrange(relative_risk_incr) %>% pull(ticker)
 df_predict %>% 
   dplyr::mutate(cutoff=cut(relative_risk_incr,breaks=c(0,0.25,0.5,0.75,seq(1,50,by=1)))) %>% 
@@ -747,7 +796,7 @@ df_predict %>%
   coord_flip()
 ```
 
-```{r}
+```{r eval=F}
 
 library(rPref)
 library(ggrepel)
@@ -771,7 +820,7 @@ top_tickers = psel(df_predict %>% group_by(ticker) %>% filter(Date==max(Date)) %
   pull(ticker)
 ```
 
-```{r}
+```{r eval=F}
 
 psel(df_predict %>% group_by(ticker) %>% filter(Date==max(Date)) %>% ungroup(), psel,top=100) %>% 
   filter(.level==1) %>% 
@@ -783,7 +832,7 @@ psel(df_predict %>% group_by(ticker) %>% filter(Date==max(Date)) %>% ungroup(), 
 ## Development over time
 
 
-```{r}
+```{r eval=F}
 
 # Re-calc
 df_covariate_r2_lm = df_ticker_data %>% 
@@ -824,7 +873,7 @@ df_covariates = df_ticker_data %>%
 ```
 
 
-```{r}
+```{r eval=F}
 df_covariates %>% 
   filter(ticker %in% top_tickers) %>% 
   filter(Date>=ymd("2024-01-01")) %>% 
@@ -845,7 +894,7 @@ df_covariates %>%
 
 # Månedsopsparing
 
-```{r fig.width=20,fig.height=10}
+```{r eval=F,fig.width=20,fig.height=10}
 
 psel(df_predict %>% group_by(ticker) %>% filter(Date==max(Date)) %>% ungroup, psel, top = 100) %>% 
   inner_join( df_nordnet ) %>% 
@@ -877,7 +926,7 @@ psel(df_predict %>% group_by(ticker) %>% filter(Date==max(Date)) %>% ungroup, ps
 
 # Uden for månedsopsparing, men positivlisten
 
-```{r fig.width=20,fig.height=10}
+```{r eval=F,fig.width=20,fig.height=10}
 
 psel(df_predict %>% group_by(ticker) %>% filter(Date==max(Date)) %>% ungroup, psel, top = nrow(df_predict)) %>% 
   inner_join( df_nordnet ) %>% 
