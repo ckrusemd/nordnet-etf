@@ -93,8 +93,7 @@ df_abis %>%
 
 ```{r nordnet}
 df_nordnet %>% 
-  kable() %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+  DT::datatable()
 ```
 
 # Nordnet - Positivliste
