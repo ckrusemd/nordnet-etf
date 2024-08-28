@@ -1,0 +1,10 @@
+rmd_files: ["index.Rmd","nordnet_etf.Rmd"]
+output:
+  bookdown::gitbook:
+    lib_dir: "_book"
+  bookdown::pdf_book:
+    keep_tex: yes
+  pdf_document:
+    toc: true
+    number_sections: true
+delete_merged_file: true
