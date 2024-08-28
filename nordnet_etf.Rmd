@@ -93,14 +93,15 @@ df_abis %>%
 
 ```{r nordnet}
 df_nordnet %>% 
-  DT::datatable()
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
 ```
 
 # Nordnet - Positivliste
 
 ```{r nordnetp}
 df_nordnet %>% 
-  filter(Positiv=="Positivliste")
+  filter(Positiv=="Positivliste") %>% 
   kable() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
 ```
@@ -109,7 +110,7 @@ df_nordnet %>%
 ```{r nordnetpm}
 df_nordnet %>% 
   filter(Positiv=="Positivliste",
-         Maanedsopsparing=="Ja")
+         Maanedsopsparing=="Ja") %>% 
   kable() %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
 ```
